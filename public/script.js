@@ -300,14 +300,33 @@ if (isAdmin) {
             
             // Инициализируем WebTorrent только для генерации магнет-ссылки
             const tempClient = new WebTorrent();
-            tempClient.add(file, (torrent) => {
-                const magnetURI = torrent.magnetURI;
-                // Как только получили Magnet-ссылку, закрываем временный клиент
-                tempClient.destroy();
+            const torrent = tempClient.add(file);
+            
+            torrent.on('infoHash', () => {
+                let magnetURI = torrent.magnetURI;
                 
-                // Рассылаем всем сгенерированную Magnet-ссылку (плееры сами скачают торрент по магнету)
+                // Добавляем WebSocket трекеры, чтобы торрент вообще мог работать в браузере
+                const webTrackers = [
+                    'wss://tracker.btorrent.xyz',
+                    'wss://tracker.openwebtorrent.com'
+                ];
+                webTrackers.forEach(tr => {
+                    if (!magnetURI.includes(encodeURIComponent(tr))) {
+                        magnetURI += '&tr=' + encodeURIComponent(tr);
+                    }
+                });
+                
+                // Рассылаем всем сгенерированную Magnet-ссылку
                 socket.emit('change_video', { url: magnetURI, isAdmin: true, room_id: roomId });
                 torrentFileInput.value = ''; // очищаем инпут
+                
+                setTimeout(() => tempClient.destroy(), 500);
+            });
+            
+            torrent.on('error', (err) => {
+                torrentStatus.textContent = 'Ошибка торрент-файла: ' + err.message;
+                setTimeout(() => { torrentStatus.style.display = 'none'; }, 3000);
+                tempClient.destroy();
             });
         };
     }
