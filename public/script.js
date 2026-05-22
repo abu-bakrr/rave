@@ -1,9 +1,10 @@
 const socket = io({ 
     reconnection: true, 
     reconnectionDelay: 1000,
-    transports: ['websocket'] // Принудительно используем только сверхбыстрые сокеты
+    transports: ['websocket']
 });
 const video = document.getElementById('main-video');
+const ytPlayerContainer = document.getElementById('yt-player');
 const videoWrapper = document.getElementById('video-wrapper');
 const videoUrlInput = document.getElementById('video-url');
 const loadUrlBtn = document.getElementById('load-url-btn');
@@ -11,33 +12,27 @@ const statusOverlay = document.getElementById('status-overlay');
 const joinOverlay = document.getElementById('join-overlay');
 const joinBtn = document.getElementById('join-btn');
 const fsBtn = document.getElementById('fs-btn');
+const torrentStatus = document.getElementById('torrent-status');
 
-// Чат
+// Чат и имена
 const chatInput = document.getElementById('chat-input');
 const sendChatBtn = document.getElementById('send-chat-btn');
 const chatMessages = document.getElementById('chat-messages');
-const floatingChat = document.getElementById('floating-chat');
-
-// Имена
 const namePrompt = document.getElementById('name-prompt');
 const userNameInput = document.getElementById('user-name-input');
 const saveNameBtn = document.getElementById('save-name-btn');
 
 const urlParams = new URLSearchParams(window.location.search);
 const isAdmin = urlParams.has('admin');
-
-// Извлекаем ID комнаты из пути /room/1234
 const roomId = window.location.pathname.split('/').pop();
 
 if (isAdmin) {
     document.body.classList.add('is-admin');
     video.controls = true;
-    // Убрали joinOverlay.style.display = 'none' отсюда, чтобы админ тоже жал "Войти" если надо
 } else {
     video.controls = false;
 }
 
-// Установка ссылки-приглашения
 const inviteUrlInput = document.getElementById('invite-url');
 const copyInviteBtn = document.getElementById('copy-invite-btn');
 if (inviteUrlInput) {
@@ -53,13 +48,142 @@ if (copyInviteBtn) {
 }
 
 let isRemoteAction = false;
-let myName = localStorage.getItem('rave_user_name'); // Новый ключ
+let myName = localStorage.getItem('rave_user_name'); 
 let isWatchingNow = false; 
-
-// --- Логика Имени ---
 video.muted = true; 
 
-// Если имя пустое или это стандартный "Гость", просим ввести нормальное
+// === УНИВЕРСАЛЬНЫЙ ПЛЕЕР ===
+let currentMode = 'html5'; // 'html5' или 'youtube'
+let ytPlayer = null;
+let ytReady = false;
+let webtorrentClient = null;
+let hlsInstance = null;
+let lastVideoUrl = '';
+
+// Инициализация YouTube API
+function onYouTubeIframeAPIReady() {
+    ytPlayer = new YT.Player('yt-player', {
+        height: '100%',
+        width: '100%',
+        videoId: '',
+        playerVars: {
+            'autoplay': 0,
+            'controls': isAdmin ? 1 : 0,
+            'disablekb': isAdmin ? 0 : 1,
+            'rel': 0,
+            'modestbranding': 1
+        },
+        events: {
+            'onReady': () => { ytReady = true; },
+            'onStateChange': onYtStateChange
+        }
+    });
+}
+
+function extractYtId(url) {
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+    const match = url.match(regExp);
+    return (match && match[2].length === 11) ? match[2] : null;
+}
+
+function stopCurrentPlayback() {
+    if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+    if (webtorrentClient) { webtorrentClient.destroy(); webtorrentClient = null; }
+    torrentStatus.style.display = 'none';
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+    if (ytReady && currentMode === 'youtube') {
+        ytPlayer.stopVideo();
+    }
+}
+
+function setMediaSource(url, time = 0, play = false) {
+    if (lastVideoUrl === url) return;
+    lastVideoUrl = url;
+    stopCurrentPlayback();
+
+    const ytId = extractYtId(url);
+    if (ytId) {
+        currentMode = 'youtube';
+        video.style.display = 'none';
+        ytPlayerContainer.style.display = 'block';
+        if (ytReady) {
+            if (play) ytPlayer.loadVideoById(ytId, time);
+            else ytPlayer.cueVideoById(ytId, time);
+        } else {
+            // Если API еще не загрузилось, ждем 1 сек и пробуем снова
+            setTimeout(() => setMediaSource(url, time, play), 1000);
+        }
+        return;
+    }
+
+    // Иначе HTML5
+    currentMode = 'html5';
+    ytPlayerContainer.style.display = 'none';
+    video.style.display = 'block';
+
+    if (url.startsWith('magnet:?')) {
+        torrentStatus.style.display = 'block';
+        torrentStatus.textContent = 'Торрент: загрузка метаданных...';
+        webtorrentClient = new WebTorrent();
+        webtorrentClient.add(url, (torrent) => {
+            const file = torrent.files.find(f => f.name.endsWith('.mp4') || f.name.endsWith('.webm') || f.name.endsWith('.mkv'));
+            if (file) {
+                file.renderTo(video);
+                torrent.on('download', (bytes) => {
+                    const speed = (torrent.downloadSpeed / 1024 / 1024).toFixed(2);
+                    const progress = (torrent.progress * 100).toFixed(1);
+                    torrentStatus.textContent = `Торрент: ${progress}% (${speed} MB/s) [Пиров: ${torrent.numPeers}]`;
+                });
+            } else {
+                torrentStatus.textContent = 'Ошибка: не найдено видео в торренте';
+            }
+        });
+    } else if (url.includes('.m3u8')) {
+        if (Hls.isSupported()) {
+            hlsInstance = new Hls();
+            hlsInstance.loadSource(url);
+            hlsInstance.attachMedia(video);
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = url;
+        }
+    } else {
+        video.src = url;
+    }
+
+    video.currentTime = time;
+    if (play) video.play().catch(() => {});
+}
+
+const PlayerAPI = {
+    getCurrentTime: () => {
+        if (currentMode === 'youtube' && ytReady) return ytPlayer.getCurrentTime() || 0;
+        return video.currentTime || 0;
+    },
+    setCurrentTime: (t) => {
+        if (currentMode === 'youtube' && ytReady) ytPlayer.seekTo(t, true);
+        else video.currentTime = t;
+    },
+    play: () => {
+        if (currentMode === 'youtube' && ytReady) ytPlayer.playVideo();
+        else video.play().catch(() => {});
+    },
+    pause: () => {
+        if (currentMode === 'youtube' && ytReady) ytPlayer.pauseVideo();
+        else video.pause();
+    },
+    isPaused: () => {
+        if (currentMode === 'youtube' && ytReady) return ytPlayer.getPlayerState() !== 1; // 1 = PLAYING
+        return video.paused;
+    },
+    setMuted: (m) => {
+        if (currentMode === 'youtube' && ytReady) { if (m) ytPlayer.mute(); else ytPlayer.unMute(); }
+        video.muted = m;
+    }
+};
+
+// === ИМЯ И СОЕДИНЕНИЕ ===
 if (!myName || myName.startsWith('Гость')) {
     namePrompt.style.display = 'flex';
 } else {
@@ -76,19 +200,15 @@ function saveMyName() {
         namePrompt.style.display = 'none';
         if (!isAdmin) joinOverlay.style.display = 'flex';
         initConnection();
-        console.log("Имя сохранено:", myName);
     } else {
         alert("Введите имя (минимум 2 буквы)");
     }
 }
-
 saveNameBtn.onclick = saveMyName;
 userNameInput.onkeydown = (e) => { if (e.key === 'Enter') saveMyName(); };
 
 function initConnection() {
-    if (myName) {
-        socket.emit('join', { name: myName, watching: isWatchingNow, room_id: roomId });
-    }
+    if (myName) socket.emit('join', { name: myName, watching: isWatchingNow, room_id: roomId });
 }
 
 document.getElementById('reset-session-btn').onclick = () => {
@@ -101,231 +221,173 @@ socket.on('connect', () => {
     socket.emit('get_sync', { room_id: roomId });
 });
 
-// --- Логика Чата ---
-// --- Логика звука чата (Web Audio API) ---
+// === ЧАТ ===
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 function playChatSound() {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
     const oscillator = audioCtx.createOscillator();
     const gainNode = audioCtx.createGain();
-
-    oscillator.type = 'sine'; // Мягкая волна
-    oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // Высокая нота (Ля)
-    oscillator.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.1); // Спад
-
-    gainNode.gain.setValueAtTime(0.02, audioCtx.currentTime); // Очень тихо (2%)
-    gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2); // Плавное затухание
-
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.1);
+    gainNode.gain.setValueAtTime(0.02, audioCtx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
     oscillator.connect(gainNode);
     gainNode.connect(audioCtx.destination);
-
     oscillator.start();
     oscillator.stop(audioCtx.currentTime + 0.2);
 }
 
 function addChatMessage(data) {
-    console.log("DEBUG CHAT DATA:", data);
-    
     let displayName = data.name;
-    
-    // ЕСЛИ ПРИШЕЛ ОБЪЕКТ - ДОСТАЕМ ИМЯ ИЗНУТРИ
-    if (typeof displayName === 'object' && displayName !== null) {
-        displayName = displayName.name || "Гость";
-    }
-    
+    if (typeof displayName === 'object' && displayName !== null) displayName = displayName.name || "Гость";
     if (!displayName) displayName = "Гость";
     
     const msg = document.createElement('div');
     msg.className = (displayName === myName) ? 'msg own' : 'msg';
-    
     msg.innerHTML = `<span class="name">${displayName}</span>${data.text}`;
-    
     chatMessages.appendChild(msg);
     chatMessages.scrollTop = chatMessages.scrollHeight;
-
     if (displayName !== myName) playChatSound();
 }
 
 function sendMsg() {
     const text = chatInput.value.trim();
-    // Если имя вдруг пропало из переменной, пробуем взять из памяти еще раз
     if (!myName) myName = localStorage.getItem('rave_user_name');
-
     if (text && myName) {
         socket.emit('chat_message', { text: text, name: myName, room_id: roomId });
         chatInput.value = '';
     } else if (!myName) {
-        namePrompt.style.display = 'flex'; // Принудительно просим имя
+        namePrompt.style.display = 'flex';
     }
 }
-
 sendChatBtn.onclick = sendMsg;
 chatInput.onkeydown = (e) => { if (e.key === 'Enter') sendMsg(); };
-
 socket.on('chat_message', addChatMessage);
 
-// --- Переключение вкладок (для всех) ---
+// Вкладки сайдбара
 document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.onclick = () => {
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         document.querySelectorAll('.sidebar-content').forEach(c => c.classList.remove('active'));
         btn.classList.add('active');
-        const tabId = btn.dataset.tab;
-        document.getElementById(tabId).classList.add('active');
+        document.getElementById(btn.dataset.tab).classList.add('active');
     };
 });
 
-// --- Логика Админки ---
+// Админ: Загрузка нового видео
 if (isAdmin) {
     loadUrlBtn.onclick = () => {
         let url = videoUrlInput.value.trim();
         if (url) {
-            if (!url.startsWith('http') && !url.startsWith('/')) url = '/' + url;
             socket.emit('change_video', { url: url, isAdmin: true, room_id: roomId });
         }
     };
 }
 
-// --- Полноэкранный режим (Двусторонний Toggle) ---
+// Полноэкранный режим
 function toggleFullScreen() {
     const isFullScreen = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
-
     if (!isFullScreen) {
-        // ВХОДИМ В ПОЛНЫЙ ЭКРАН
-        if (videoWrapper.requestFullscreen) {
-            videoWrapper.requestFullscreen();
-        } else if (videoWrapper.webkitRequestFullscreen) {
-            videoWrapper.webkitRequestFullscreen();
-        } else if (video.webkitEnterFullscreen) {
-            // Специфично для iPhone
-            video.webkitEnterFullscreen();
-        }
-        
-        // Пытаемся развернуть экран горизонтально (для Android)
-        if (screen.orientation && screen.orientation.lock) {
-            screen.orientation.lock('landscape').catch(() => {});
-        }
+        if (videoWrapper.requestFullscreen) videoWrapper.requestFullscreen();
+        else if (videoWrapper.webkitRequestFullscreen) videoWrapper.webkitRequestFullscreen();
+        if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {});
     } else {
-        // ВЫХОДИМ ИЗ ПОЛНОГО ЭКРАНА
-        if (document.exitFullscreen) {
-            document.exitFullscreen();
-        } else if (document.webkitExitFullscreen) {
-            document.webkitExitFullscreen();
-        }
-        
-        if (screen.orientation && screen.orientation.unlock) {
-            screen.orientation.unlock();
-        }
+        if (document.exitFullscreen) document.exitFullscreen();
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock();
     }
 }
-
 fsBtn.onclick = toggleFullScreen;
-
-// Следим за системным изменением (например, если нажали Esc или кнопку "Назад")
 document.addEventListener('fullscreenchange', updateFsButton);
 document.addEventListener('webkitfullscreenchange', updateFsButton);
-
 function updateFsButton() {
     const isFS = document.fullscreenElement || document.webkitFullscreenElement;
     fsBtn.textContent = isFS ? '✖ Выйти' : '⛶ Во весь экран';
 }
 
-// --- Синхронизация Видео ---
+// === СИНХРОНИЗАЦИЯ ===
 joinBtn.onclick = () => {
     joinOverlay.style.opacity = '0';
     setTimeout(() => joinOverlay.style.display = 'none', 500);
-    video.muted = false; 
+    PlayerAPI.setMuted(false); 
+    if (audioCtx.state === 'suspended') audioCtx.resume();
     
-    // Помечаем, что мы вошли
     isWatchingNow = true;
     socket.emit('start_watching', { room_id: roomId });
     
-    video.play().then(() => {
-        socket.emit('get_sync', { room_id: roomId });
-    }).catch(() => {});
+    PlayerAPI.play();
+    socket.emit('get_sync', { room_id: roomId });
     initConnection();
 };
 
 socket.on('sync', (state) => {
-    // 1. ПОДГРУЖАЕМ ИСТОРИЮ ЧАТА (только один раз при входе)
     if (state.chat_history && chatMessages.children.length === 0) {
         state.chat_history.forEach(msg => addChatMessage(msg));
     }
 
-    // 2. СИНХРОНИЗАЦИЯ ФАЙЛА
+    if (state.videoUrl && lastVideoUrl !== state.videoUrl) {
+        isRemoteAction = true;
+        setMediaSource(state.videoUrl, state.currentTime, state.playing);
+    }
+
     if (state.videoUrl) {
-        const currentSrc = video.getAttribute('src') || '';
-        if (currentSrc !== state.videoUrl && !video.src.endsWith(state.videoUrl)) {
-            isRemoteAction = true;
-            video.src = state.videoUrl;
+        const diff = Math.abs(PlayerAPI.getCurrentTime() - state.currentTime);
+        if (!state.playing) {
+            if (!PlayerAPI.isPaused() || diff > 0.5) {
+                isRemoteAction = true;
+                PlayerAPI.setCurrentTime(state.currentTime);
+                PlayerAPI.pause();
+            }
+        } else {
+            if (diff > 1.5) {
+                isRemoteAction = true;
+                PlayerAPI.setCurrentTime(state.currentTime);
+            }
+            if (PlayerAPI.isPaused()) {
+                isRemoteAction = true;
+                PlayerAPI.play();
+            }
         }
+        video.playbackRate = 1.0;
+        setTimeout(() => isRemoteAction = false, 100);
     }
-
-    // 3. ЖЕСТКАЯ СИНХРОНИЗАЦИЯ ВРЕМЕНИ И ПАУЗЫ
-    const diff = Math.abs(video.currentTime - state.currentTime);
-    
-    // Если админ на паузе — СТОП И ВОЗВРАТ В МОМЕНТ
-    if (!state.playing) {
-        if (!video.paused || diff > 0.1) {
-            isRemoteAction = true;
-            video.currentTime = state.currentTime;
-            video.pause();
-        }
-    } 
-    // Если админ играет
-    else {
-        if (diff > 1.0) {
-            isRemoteAction = true;
-            video.currentTime = state.currentTime;
-        }
-        if (video.paused) {
-            isRemoteAction = true;
-            video.play().catch(() => {});
-        }
-    }
-
-    video.playbackRate = 1.0;
-    setTimeout(() => isRemoteAction = false, 50);
 });
 
 socket.on('play', (data) => {
     isRemoteAction = true;
-    video.currentTime = data.currentTime;
-    video.muted = false; // Принудительно включаем звук при старте
-    video.play().catch(() => {});
-    setTimeout(() => isRemoteAction = false, 50);
+    PlayerAPI.setCurrentTime(data.currentTime);
+    PlayerAPI.setMuted(false);
+    PlayerAPI.play();
+    setTimeout(() => isRemoteAction = false, 100);
 });
 
 socket.on('pause', (data) => {
     isRemoteAction = true;
-    video.currentTime = data.currentTime;
-    video.pause();
-    setTimeout(() => isRemoteAction = false, 50);
+    PlayerAPI.setCurrentTime(data.currentTime);
+    PlayerAPI.pause();
+    setTimeout(() => isRemoteAction = false, 100);
 });
 
 socket.on('seek', (data) => {
     isRemoteAction = true;
-    video.currentTime = data.currentTime;
-    setTimeout(() => isRemoteAction = false, 50);
+    PlayerAPI.setCurrentTime(data.currentTime);
+    setTimeout(() => isRemoteAction = false, 100);
 });
 
 socket.on('change_video', (data) => {
     isRemoteAction = true;
-    video.src = data.url;
-    video.currentTime = 0;
-    video.play().catch(() => {});
-    setTimeout(() => isRemoteAction = false, 50);
+    setMediaSource(data.url, 0, true);
+    setTimeout(() => isRemoteAction = false, 100);
 });
 
 socket.on('update_users', (userList) => {
     document.getElementById('participant-count').textContent = userList.length;
     const list = document.getElementById('user-list');
     list.innerHTML = ''; 
-    
     userList.forEach(user => {
         const li = document.createElement('li');
         li.className = 'user-item';
-        
-        // Проверяем, мы ли это (теперь учитываем Гость #)
         const isGuest = user.name.startsWith('Гость #');
         const isMe = user.name === myName || (isGuest && !myName);
         const isWatching = isMe ? isWatchingNow : user.watching;
@@ -339,7 +401,6 @@ socket.on('update_users', (userList) => {
         
         const statusText = document.createElement('span');
         statusText.className = 'status-text';
-        
         if (isWatching) {
             statusText.textContent = 'смотрит';
             statusText.style.color = '#10b981';
@@ -355,7 +416,49 @@ socket.on('update_users', (userList) => {
     });
 });
 
-// --- Блокировка системных кнопок (MediaSession) ---
+// === СОБЫТИЯ ОТ ПЛЕЕРОВ К АДМИНУ ===
+function onYtStateChange(event) {
+    if (!isAdmin) {
+        if (!isRemoteAction && (event.data === YT.PlayerState.PLAYING || event.data === YT.PlayerState.PAUSED || event.data === YT.PlayerState.BUFFERING)) {
+            // Если гость пытается перехватить ютуб
+            socket.emit('get_sync', { room_id: roomId });
+        }
+        return;
+    }
+    if (!isRemoteAction) {
+        if (event.data === YT.PlayerState.PLAYING) socket.emit('play', { currentTime: ytPlayer.getCurrentTime(), isAdmin: true, room_id: roomId });
+        if (event.data === YT.PlayerState.PAUSED) socket.emit('pause', { currentTime: ytPlayer.getCurrentTime(), isAdmin: true, room_id: roomId });
+    }
+}
+
+if (isAdmin) {
+    video.onplay = () => { if (!isRemoteAction && currentMode === 'html5') socket.emit('play', { currentTime: video.currentTime, isAdmin: true, room_id: roomId }); };
+    video.onpause = () => { if (!isRemoteAction && currentMode === 'html5') socket.emit('pause', { currentTime: video.currentTime, isAdmin: true, room_id: roomId }); };
+    video.onseeked = () => { if (!isRemoteAction && currentMode === 'html5') socket.emit('seek', { currentTime: video.currentTime, isAdmin: true, room_id: roomId }); };
+
+    setInterval(() => {
+        if (!PlayerAPI.isPaused()) {
+            socket.emit('heartbeat', { 
+                currentTime: PlayerAPI.getCurrentTime(), 
+                playing: true, 
+                isAdmin: true,
+                room_id: roomId
+            });
+        }
+    }, 1000);
+} else {
+    const forceSync = () => {
+        if (!isRemoteAction && currentMode === 'html5') {
+            socket.emit('get_sync', { room_id: roomId });
+            if (video.paused) video.play().catch(() => {});
+        }
+    };
+    video.onplay = forceSync;
+    video.onpause = forceSync;
+    video.onseeking = forceSync;
+    video.onratechange = () => { video.playbackRate = 1.0; };
+}
+
 function lockMediaSession() {
     if ('mediaSession' in navigator) {
         navigator.mediaSession.setActionHandler('play', null);
@@ -365,43 +468,5 @@ function lockMediaSession() {
         navigator.mediaSession.setActionHandler('seekto', null);
     }
 }
-
-if (isAdmin) {
-    video.onplay = () => { if (!isRemoteAction) socket.emit('play', { currentTime: video.currentTime, isAdmin: true, room_id: roomId }); };
-    video.onpause = () => { if (!isRemoteAction) socket.emit('pause', { currentTime: video.currentTime, isAdmin: true, room_id: roomId }); };
-    video.onseeked = () => { if (!isRemoteAction) socket.emit('seek', { currentTime: video.currentTime, isAdmin: true, room_id: roomId }); };
-
-    // Сердечный ритм админа: раз в секунду для максимальной точности
-    setInterval(() => {
-        if (!video.paused) {
-            socket.emit('heartbeat', { 
-                currentTime: video.currentTime, 
-                playing: !video.paused, 
-                isAdmin: true,
-                room_id: roomId
-            });
-        }
-    }, 1000);
-} else {
-    // МГНОВЕННАЯ синхронизация и блокировка действий для зрителей
-    const forceSync = () => {
-        if (!isRemoteAction) {
-            console.log("Попытка вмешательства! Блокируем...");
-            // Немедленно возвращаем состояние админа
-            socket.emit('get_sync', { room_id: roomId });
-            
-            // Если админ играет, а зритель нажал паузу — принудительно запускаем
-            if (video.paused) {
-                video.play().catch(() => {});
-            }
-            lockMediaSession();
-        }
-    };
-    video.onplay = forceSync;
-    video.onpause = forceSync;
-    video.onseeking = forceSync;
-    video.onratechange = () => { video.playbackRate = 1.0; }; // Запрещаем менять скорость
-}
-
 lockMediaSession();
 socket.emit('get_sync', { room_id: roomId });
