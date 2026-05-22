@@ -1,0 +1,446 @@
+:root {
+    --bg: #050505;
+    --sidebar-bg: #0f0f12;
+    --accent: #8b5cf6; /* Фиолетовый акцент */
+    --accent-hover: #a78bfa;
+    --text: #ffffff;
+    --text-muted: #94a3b8;
+    --border: #1f1f23;
+    --chat-bubble: #1a1a1e;
+    --glass: rgba(255, 255, 255, 0.03);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100dvh; /* Динамическая высота для мобилок */
+    overflow: hidden;
+    letter-spacing: -0.02em;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Экраны-оверлеи */
+.overlay-screen {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: radial-gradient(circle at center, #1e1b4b 0%, #050505 100%);
+    backdrop-filter: blur(20px);
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2rem;
+}
+
+.prompt-card {
+    background: var(--sidebar-bg);
+    padding: 3rem;
+    border-radius: 32px;
+    border: 1px solid var(--border);
+    width: 90%;
+    max-width: 500px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    text-align: center;
+}
+
+.prompt-card h1 { margin-bottom: 1.5rem; font-size: 1.8rem; font-weight: 800; }
+
+.user-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 12px;
+    margin-bottom: 8px;
+    transition: 0.3s;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    box-shadow: 0 0 10px currentColor;
+}
+
+.status-dot.online {
+    background: #10b981; /* Зеленый */
+    color: #10b981;
+}
+
+.status-dot.offline {
+    background: #6b7280; /* Серый */
+    color: #6b7280;
+    box-shadow: none;
+}
+
+.status-text {
+    margin-left: auto;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.5;
+}
+
+.overlay-screen input {
+    width: 100%;
+    padding: 1.2rem;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    color: white;
+    font-size: 16px; /* Фикс зума на iOS */
+    margin-bottom: 1rem;
+    outline: none;
+    transition: 0.3s;
+}
+
+.overlay-screen input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.2); }
+
+.overlay-screen button {
+    width: 100%;
+    padding: 1.2rem;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    font-size: 1.1rem;
+    transition: 0.3s;
+}
+
+.overlay-screen button:hover { background: var(--accent-hover); transform: translateY(-2px); }
+
+/* Главная разметка */
+.main-layout {
+    display: flex;
+    width: 100%;
+    height: 100%;
+}
+
+.content-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: #000;
+    position: relative;
+}
+
+.video-wrapper {
+    flex: 1;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+}
+
+video {
+    max-width: 100%;
+    max-height: 100%;
+    width: 100%;
+}
+
+/* Сайдбар */
+.sidebar {
+    width: 380px;
+    background: var(--sidebar-bg);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+}
+
+.sidebar-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    background: rgba(0,0,0,0.2);
+}
+
+.tab-btn {
+    flex: 1;
+    padding: 1rem;
+    background: none;
+    border: none;
+    color: var(--text);
+    opacity: 0.5;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.85rem;
+    transition: 0.3s;
+}
+
+.tab-btn.active {
+    opacity: 1;
+    color: var(--accent);
+    border-bottom: 2px solid var(--accent);
+}
+
+.sidebar-content {
+    display: none;
+    flex: 1;
+    padding: 1.5rem;
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+.sidebar-content.active {
+    display: flex;
+}
+
+.admin-controls-section {
+    padding: 1.5rem;
+    border-top: 1px solid var(--border);
+    background: rgba(139, 92, 246, 0.05);
+}
+
+/* Красивая Админка */
+.panel-header {
+    margin-bottom: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.panel-header h2 { font-size: 1.2rem; font-weight: 700; }
+
+.badge {
+    background: rgba(139, 92, 246, 0.1);
+    color: var(--accent);
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.7rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.control-group {
+    background: var(--glass);
+    padding: 1.2rem;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    margin-bottom: 1.5rem;
+}
+
+.control-group label {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 0.8rem;
+    text-transform: uppercase;
+    font-weight: 700;
+}
+
+.input-row {
+    display: flex;
+    gap: 8px;
+}
+
+.input-row input {
+    flex: 1;
+    background: #000;
+    border: 1px solid var(--border);
+    padding: 0.8rem;
+    border-radius: 12px;
+    color: white;
+    outline: none;
+    font-size: 16px; /* Фикс зума на iOS */
+}
+
+.input-row button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 0 1.2rem;
+    border-radius: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+/* Чат */
+.chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    margin-bottom: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 5px;
+}
+
+.msg {
+    padding: 12px 16px;
+    background: var(--chat-bubble);
+    border-radius: 20px;
+    border-top-left-radius: 4px;
+    font-size: 0.95rem;
+    max-width: 85%;
+    line-height: 1.5;
+    position: relative;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    align-self: flex-start;
+}
+
+/* Сообщения от текущего пользователя (будем подсвечивать их через JS или просто стилями) */
+.msg.own {
+    align-self: flex-end;
+    background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
+    border-radius: 20px;
+    border-top-right-radius: 4px;
+    border-top-left-radius: 20px;
+    border: 1px solid rgba(139, 92, 246, 0.3);
+}
+
+.msg .name {
+    font-weight: 900;
+    font-size: 0.8rem;
+    color: var(--accent);
+    margin-bottom: 6px;
+    display: block;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.msg.own .name {
+    color: #a78bfa;
+    text-align: right;
+}
+
+.chat-input-area {
+    display: flex;
+    gap: 10px;
+    background: var(--glass);
+    padding: 8px;
+    border-radius: 16px;
+    border: 1px solid var(--border);
+}
+
+.chat-input-area input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    padding: 0.8rem;
+    color: white;
+    outline: none;
+    font-size: 16px; /* Фикс зума на iOS */
+}
+
+#send-chat-btn {
+    background: var(--accent);
+    color: white;
+    border: none;
+    width: 45px;
+    height: 45px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 1.2rem;
+    transition: 0.3s;
+}
+
+#send-chat-btn:hover { transform: scale(1.05); background: var(--accent-hover); }
+
+/* Летящий чат */
+.floating-chat-container {
+    position: absolute;
+    bottom: 40px;
+    left: 20px;
+    right: 20px;
+    height: 120px;
+    pointer-events: none;
+    z-index: 100;
+}
+
+/* Адаптивность */
+@media (max-width: 900px) {
+    .main-layout {
+        flex-direction: column;
+        height: 100%; /* Занимаем всё доступное место */
+    }
+    .content-area { 
+        height: auto; 
+        flex: none; /* Видео не должно растягиваться */
+    }
+    .video-wrapper { 
+        flex: none; 
+        width: 100%; 
+        aspect-ratio: 16/9; 
+    }
+    .sidebar { 
+        width: 100%; 
+        border-left: none; 
+        flex: 1; /* Чат занимает всё ОСТАВШЕЕСЯ место */
+        height: 0; /* Важно для корректного flex-сжатия */
+        border-top: 1px solid var(--border);
+    }
+    
+    /* Убираем лишние отступы в полноэкранном, чтобы не мешало */
+    .video-wrapper.fake-fullscreen {
+        height: 100dvh !important;
+    }
+}
+
+/* Управление ролями */
+.admin-only { display: none !important; }
+body.is-admin .admin-only { display: flex !important; }
+.guest-only { display: none !important; }
+body:not(.is-admin) .guest-only { display: flex !important; }
+
+body.is-admin .sidebar-content { display: none !important; }
+body.is-admin .sidebar-content.active { display: flex !important; }
+body:not(.is-admin) .chat-panel { display: flex !important; }
+
+.video-click-shield { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; display: none; }
+body:not(.is-admin) .video-click-shield { display: block; }
+
+.guest-controls {
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    z-index: 200;
+}
+
+.custom-fs-btn {
+    background: rgba(139, 92, 246, 0.5);
+    backdrop-filter: blur(10px);
+    padding: 10px 20px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.1);
+    color: white;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.status-indicator {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    background: rgba(0,0,0,0.6);
+    padding: 6px 16px;
+    border-radius: 100px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    opacity: 0;
+    z-index: 200;
+}
+
+/* Фикс для полноэкранного режима на iOS/Android */
+.video-wrapper.fake-fullscreen {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    z-index: 9999 !important;
+    background: #000 !important;
+}
+
+@keyframes swim { from { right: -100%; } to { right: 100%; } }

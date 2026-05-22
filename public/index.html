@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Rave - Watch</title>
+    <link rel="stylesheet" href="/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.1.2/socket.io.min.js"></script>
+</head>
+<body>
+    <!-- Окно ввода имени -->
+    <div id="name-prompt" class="overlay-screen">
+        <div class="prompt-card">
+            <h1>Как вас зовут?</h1>
+            <input type="text" id="user-name-input" placeholder="Введите ваше имя...">
+            <button id="save-name-btn">Продолжить</button>
+        </div>
+    </div>
+
+    <!-- Кнопка «Войти» (для разблокировки звука) -->
+    <div id="join-overlay" class="overlay-screen" style="display: none;">
+        <button id="join-btn">🚀 ВОЙТИ В ПРОСМОТР</button>
+        <p>Нажмите для синхронизации</p>
+    </div>
+
+    <div class="main-layout" id="app-container">
+        <!-- Левая часть: Видео и чат под ним -->
+        <div class="content-area">
+            <div class="video-wrapper" id="video-wrapper">
+                <video id="main-video" preload="auto" playsinline webkit-playsinline disableRemotePlayback x-webkit-airplay="deny">
+                    Ваш браузер не поддерживает видео.
+                </video>
+                <div class="video-click-shield"></div>
+                <div id="status-overlay" class="status-indicator">Подключение...</div>
+                
+                <!-- Кастомное управление для друзей -->
+                <div class="guest-controls guest-only">
+                    <button id="fs-btn" class="custom-fs-btn">⛶ Во весь экран</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Правая часть: Сайдбар для всех -->
+        <aside class="sidebar">
+            <div class="sidebar-tabs">
+                <button class="tab-btn active" data-tab="chat-tab">Чат</button>
+                <button class="tab-btn" data-tab="participants-tab">Участники (<span id="participant-count">0</span>)</button>
+            </div>
+
+            <!-- Вкладка Чата -->
+            <div id="chat-tab" class="sidebar-content active">
+                <div class="chat-messages" id="chat-messages"></div>
+                <div class="chat-input-area">
+                    <input type="text" id="chat-input" placeholder="Написать сообщение...">
+                    <button id="send-chat-btn">➔</button>
+                </div>
+            </div>
+
+            <!-- Вкладка Участников -->
+            <div id="participants-tab" class="sidebar-content">
+                <div class="participants-header">
+                    В комнате
+                    <button id="reset-session-btn" style="font-size: 0.6rem; opacity: 0.5; background: none; border: 1px solid white; color: white; border-radius: 4px; padding: 2px 5px; cursor: pointer;">Сброс</button>
+                </div>
+                <ul class="participants-list" id="user-list"></ul>
+            </div>
+
+            <!-- Управление (только для админа) -->
+            <div class="admin-only admin-controls-section">
+                <div class="input-row">
+                    <input type="text" id="video-url" placeholder="Ссылка на видео (.mp4)">
+                    <button id="load-url-btn">Загрузить</button>
+                </div>
+            </div>
+            
+            <!-- Блок приглашения друзей -->
+            <div class="invite-section" style="padding: 15px; border-top: 1px solid rgba(255,255,255,0.1);">
+                <p style="font-size: 0.8rem; color: #9ca3af; margin-bottom: 5px;">Пригласить друзей:</p>
+                <div class="input-row">
+                    <input type="text" id="invite-url" readonly style="font-size: 0.8rem; background: rgba(0,0,0,0.5);">
+                    <button id="copy-invite-btn" style="padding: 10px;">Копировать</button>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <script src="/script.js?v=4"></script>
+</body>
+</html>

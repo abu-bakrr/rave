@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Rave - Совместный просмотр видео</title>
+    <link rel="stylesheet" href="/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background: radial-gradient(circle at 50% 50%, #2a0845, #6441A5);
+            margin: 0;
+            color: white;
+            font-family: 'Inter', sans-serif;
+            text-align: center;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            max-width: 400px;
+            width: 90%;
+        }
+        h1 {
+            font-weight: 800;
+            margin-bottom: 10px;
+            font-size: 2.5rem;
+            letter-spacing: 1px;
+            text-shadow: 0 0 15px rgba(255,255,255,0.3);
+        }
+        p {
+            font-size: 1rem;
+            color: #d1d5db;
+            margin-bottom: 30px;
+            line-height: 1.5;
+        }
+        .create-btn {
+            background: linear-gradient(135deg, #6ee7b7, #3b82f6);
+            border: none;
+            color: #000;
+            font-size: 1.2rem;
+            font-weight: 800;
+            padding: 15px 30px;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            width: 100%;
+        }
+        .create-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.6);
+        }
+        .create-btn:active {
+            transform: scale(0.95);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Rave</h1>
+        <p>Смотрите видео вместе с друзьями синхронно. Создайте свою комнату прямо сейчас!</p>
+        <button class="create-btn" id="create-room-btn">🚀 СОЗДАТЬ КОМНАТУ</button>
+    </div>
+
+    <script>
+        document.getElementById('create-room-btn').addEventListener('click', async () => {
+            const btn = document.getElementById('create-room-btn');
+            btn.textContent = 'СОЗДАНИЕ...';
+            btn.style.opacity = '0.7';
+            
+            try {
+                const response = await fetch('/create_room', { method: 'POST' });
+                const data = await response.json();
+                if (data.room_id) {
+                    // Перенаправляем создателя комнаты с правами администратора
+                    window.location.href = `/room/${data.room_id}?admin=1`;
+                }
+            } catch (err) {
+                console.error(err);
+                alert('Ошибка при создании комнаты');
+                btn.textContent = '🚀 СОЗДАТЬ КОМНАТУ';
+                btn.style.opacity = '1';
+            }
+        });
+    </script>
+</body>
+</html>
