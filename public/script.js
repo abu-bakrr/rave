@@ -8,6 +8,8 @@ const ytContainer = document.getElementById('yt-container');
 const videoWrapper = document.getElementById('video-wrapper');
 const videoUrlInput = document.getElementById('video-url');
 const loadUrlBtn = document.getElementById('load-url-btn');
+const torrentFileInput = document.getElementById('torrent-file-input');
+const loadTorrentBtn = document.getElementById('load-torrent-btn');
 const statusOverlay = document.getElementById('status-overlay');
 const joinOverlay = document.getElementById('join-overlay');
 const joinBtn = document.getElementById('join-btn');
@@ -283,6 +285,32 @@ if (isAdmin) {
             socket.emit('change_video', { url: url, isAdmin: true, room_id: roomId });
         }
     };
+    
+    // Обработка загрузки .torrent файла
+    if (loadTorrentBtn && torrentFileInput) {
+        loadTorrentBtn.onclick = () => torrentFileInput.click();
+        
+        torrentFileInput.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            // Временно показываем статус
+            torrentStatus.style.display = 'block';
+            torrentStatus.textContent = 'Обработка торрент-файла...';
+            
+            // Инициализируем WebTorrent только для генерации магнет-ссылки
+            const tempClient = new WebTorrent();
+            tempClient.add(file, (torrent) => {
+                const magnetURI = torrent.magnetURI;
+                // Как только получили Magnet-ссылку, закрываем временный клиент
+                tempClient.destroy();
+                
+                // Рассылаем всем сгенерированную Magnet-ссылку (плееры сами скачают торрент по магнету)
+                socket.emit('change_video', { url: magnetURI, isAdmin: true, room_id: roomId });
+                torrentFileInput.value = ''; // очищаем инпут
+            });
+        };
+    }
 }
 
 // Полноэкранный режим
