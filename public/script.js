@@ -4,7 +4,7 @@ const socket = io({
     transports: ['websocket']
 });
 const video = document.getElementById('main-video');
-const ytPlayerContainer = document.getElementById('yt-player');
+const ytContainer = document.getElementById('yt-container');
 const videoWrapper = document.getElementById('video-wrapper');
 const videoUrlInput = document.getElementById('video-url');
 const loadUrlBtn = document.getElementById('load-url-btn');
@@ -107,7 +107,7 @@ function setMediaSource(url, time = 0, play = false) {
     if (ytId) {
         currentMode = 'youtube';
         video.style.display = 'none';
-        ytPlayerContainer.style.display = 'block';
+        ytContainer.style.display = 'block';
         if (ytReady) {
             if (play) ytPlayer.loadVideoById(ytId, time);
             else ytPlayer.cueVideoById(ytId, time);
@@ -120,7 +120,7 @@ function setMediaSource(url, time = 0, play = false) {
 
     // Иначе HTML5
     currentMode = 'html5';
-    ytPlayerContainer.style.display = 'none';
+    ytContainer.style.display = 'none';
     video.style.display = 'block';
 
     if (url.startsWith('magnet:?')) {
