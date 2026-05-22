@@ -5,6 +5,7 @@ const socket = io({
 });
 const video = document.getElementById('main-video');
 const ytContainer = document.getElementById('yt-container');
+const webtorContainer = document.getElementById('webtor-container');
 const videoWrapper = document.getElementById('video-wrapper');
 const videoUrlInput = document.getElementById('video-url');
 const loadUrlBtn = document.getElementById('load-url-btn');
@@ -55,10 +56,13 @@ let isWatchingNow = false;
 video.muted = true; 
 
 // === УНИВЕРСАЛЬНЫЙ ПЛЕЕР ===
-let currentMode = 'html5'; // 'html5' или 'youtube'
+let currentMode = 'html5'; // 'html5', 'youtube', 'webtor'
 let ytPlayer = null;
 let ytReady = false;
-let webtorrentClient = null;
+let webtorPlayer = null;
+let webtorReady = false;
+let webtorCurrentTime = 0;
+let webtorPlaying = false;
 let hlsInstance = null;
 let lastVideoUrl = '';
 
@@ -90,13 +94,18 @@ function extractYtId(url) {
 
 function stopCurrentPlayback() {
     if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
-    if (webtorrentClient) { webtorrentClient.destroy(); webtorrentClient = null; }
     torrentStatus.style.display = 'none';
     video.pause();
     video.removeAttribute('src');
     video.load();
     if (ytReady && currentMode === 'youtube') {
         ytPlayer.stopVideo();
+    }
+    if (currentMode === 'webtor') {
+        webtorContainer.innerHTML = '';
+        webtorPlayer = null;
+        webtorReady = false;
+        webtorPlaying = false;
     }
 }
 
@@ -120,38 +129,56 @@ function setMediaSource(url, time = 0, play = false) {
         return;
     }
 
-    // Иначе HTML5
-    currentMode = 'html5';
+    // Иначе HTML5 или Webtor
     ytContainer.style.display = 'none';
-    video.style.display = 'block';
 
     if (url.startsWith('magnet:?')) {
-        torrentStatus.style.display = 'block';
-        torrentStatus.textContent = 'Торрент: загрузка метаданных...';
-        webtorrentClient = new WebTorrent();
-        webtorrentClient.add(url, (torrent) => {
-            const file = torrent.files.find(f => f.name.endsWith('.mp4') || f.name.endsWith('.webm') || f.name.endsWith('.mkv'));
-            if (file) {
-                file.renderTo(video);
-                torrent.on('download', (bytes) => {
-                    const speed = (torrent.downloadSpeed / 1024 / 1024).toFixed(2);
-                    const progress = (torrent.progress * 100).toFixed(1);
-                    torrentStatus.textContent = `Торрент: ${progress}% (${speed} MB/s) [Пиров: ${torrent.numPeers}]`;
-                });
-            } else {
-                torrentStatus.textContent = 'Ошибка: не найдено видео в торренте';
-            }
+        currentMode = 'webtor';
+        video.style.display = 'none';
+        webtorContainer.style.display = 'block';
+        webtorContainer.innerHTML = '';
+        webtorReady = false;
+        
+        window.webtor = window.webtor || [];
+        window.webtor.push({
+            id: 'webtor-container',
+            magnet: url,
+            on: function(e) {
+                if (e.name === window.webtor.INITED) {
+                    webtorPlayer = e.player;
+                    webtorReady = true;
+                    if (play) webtorPlayer.play();
+                    if (time > 0) webtorPlayer.setPosition(time);
+                }
+                if (e.name === window.webtor.PLAY) {
+                    webtorPlaying = true;
+                    onWebtorStateChange(true);
+                }
+                if (e.name === window.webtor.PAUSE) {
+                    webtorPlaying = false;
+                    onWebtorStateChange(false);
+                }
+                if (e.name === window.webtor.CURRENT_TIME) {
+                    webtorCurrentTime = e.data;
+                }
+            },
+            lang: 'ru'
         });
-    } else if (url.includes('.m3u8')) {
-        if (Hls.isSupported()) {
-            hlsInstance = new Hls();
-            hlsInstance.loadSource(url);
-            hlsInstance.attachMedia(video);
-        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    } else {
+        currentMode = 'html5';
+        webtorContainer.style.display = 'none';
+        video.style.display = 'block';
+        if (url.includes('.m3u8')) {
+            if (Hls.isSupported()) {
+                hlsInstance = new Hls();
+                hlsInstance.loadSource(url);
+                hlsInstance.attachMedia(video);
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                video.src = url;
+            }
+        } else {
             video.src = url;
         }
-    } else {
-        video.src = url;
     }
 
     video.currentTime = time;
@@ -161,22 +188,27 @@ function setMediaSource(url, time = 0, play = false) {
 const PlayerAPI = {
     getCurrentTime: () => {
         if (currentMode === 'youtube' && ytReady) return ytPlayer.getCurrentTime() || 0;
+        if (currentMode === 'webtor') return webtorCurrentTime || 0;
         return video.currentTime || 0;
     },
     setCurrentTime: (t) => {
         if (currentMode === 'youtube' && ytReady) ytPlayer.seekTo(t, true);
+        else if (currentMode === 'webtor' && webtorReady) webtorPlayer.setPosition(t);
         else video.currentTime = t;
     },
     play: () => {
         if (currentMode === 'youtube' && ytReady) ytPlayer.playVideo();
+        else if (currentMode === 'webtor' && webtorReady) webtorPlayer.play();
         else video.play().catch(() => {});
     },
     pause: () => {
         if (currentMode === 'youtube' && ytReady) ytPlayer.pauseVideo();
+        else if (currentMode === 'webtor' && webtorReady) webtorPlayer.pause();
         else video.pause();
     },
     isPaused: () => {
-        if (currentMode === 'youtube' && ytReady) return ytPlayer.getPlayerState() !== 1; // 1 = PLAYING
+        if (currentMode === 'youtube' && ytReady) return ytPlayer.getPlayerState() !== 1;
+        if (currentMode === 'webtor') return !webtorPlaying;
         return video.paused;
     },
     setMuted: (m) => {
@@ -304,22 +336,8 @@ if (isAdmin) {
             
             torrent.on('infoHash', () => {
                 let magnetURI = torrent.magnetURI;
-                
-                // Добавляем WebSocket трекеры, чтобы торрент вообще мог работать в браузере
-                const webTrackers = [
-                    'wss://tracker.btorrent.xyz',
-                    'wss://tracker.openwebtorrent.com'
-                ];
-                webTrackers.forEach(tr => {
-                    if (!magnetURI.includes(encodeURIComponent(tr))) {
-                        magnetURI += '&tr=' + encodeURIComponent(tr);
-                    }
-                });
-                
-                // Рассылаем всем сгенерированную Magnet-ссылку
                 socket.emit('change_video', { url: magnetURI, isAdmin: true, room_id: roomId });
                 torrentFileInput.value = ''; // очищаем инпут
-                
                 setTimeout(() => tempClient.destroy(), 500);
             });
             
@@ -464,6 +482,17 @@ socket.on('update_users', (userList) => {
 });
 
 // === СОБЫТИЯ ОТ ПЛЕЕРОВ К АДМИНУ ===
+function onWebtorStateChange(playing) {
+    if (!isAdmin) {
+        if (!isRemoteAction) socket.emit('get_sync', { room_id: roomId });
+        return;
+    }
+    if (!isRemoteAction) {
+        if (playing) socket.emit('play', { currentTime: webtorCurrentTime, isAdmin: true, room_id: roomId });
+        else socket.emit('pause', { currentTime: webtorCurrentTime, isAdmin: true, room_id: roomId });
+    }
+}
+
 function onYtStateChange(event) {
     if (!isAdmin) {
         if (!isRemoteAction && (event.data === YT.PlayerState.PLAYING || event.data === YT.PlayerState.PAUSED || event.data === YT.PlayerState.BUFFERING)) {
