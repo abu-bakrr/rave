@@ -4,7 +4,10 @@ monkey.patch_all()
 import os
 import sys
 import uuid
-from flask import Flask, request, send_from_directory, make_response, redirect
+import json
+import requests as http_requests
+from urllib.parse import quote, unquote
+from flask import Flask, request, send_from_directory, make_response, redirect, jsonify, Response
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_compress import Compress
 from gevent.pywsgi import WSGIServer
@@ -23,15 +26,15 @@ socketio = SocketIO(app,
     cookie=None
 )
 
-# Формат rooms:
-# {
-#    "room_id": {
-#        "video_state": {'playing': False, 'currentTime': 0, 'videoUrl': None},
-#        "users": { sid: {'name': '...', 'watching': False} },
-#        "chat_history": [],
-#        "guest_counter": 0
-#    }
-# }
+# === КОНФИГ ===
+def load_config():
+    try:
+        with open('config.json') as f:
+            return json.load(f)
+    except:
+        return {}
+
+# === КОМНАТЫ ===
 rooms = {}
 
 def get_room(room_id):
@@ -44,6 +47,7 @@ def get_room(room_id):
         }
     return rooms[room_id]
 
+# === СТРАНИЦЫ ===
 @app.route('/')
 def index():
     return send_from_directory('public', 'home.html')
@@ -57,9 +61,110 @@ def create_room():
 def serve_room(room_id):
     return send_from_directory('public', 'index.html')
 
+# === API: ПОИСК ФИЛЬМОВ (TMDB) ===
+@app.route('/api/search')
+def api_search():
+    query = request.args.get('q', '')
+    if not query:
+        return jsonify({'results': []})
+    
+    config = load_config()
+    tmdb_key = config.get('tmdb_api_key', '')
+    if not tmdb_key:
+        return jsonify({'error': 'TMDB API ключ не настроен. Добавьте его в config.json', 'results': []})
+    
+    try:
+        resp = http_requests.get(
+            'https://api.themoviedb.org/3/search/multi',
+            params={'api_key': tmdb_key, 'query': query, 'language': 'ru-RU'},
+            timeout=10
+        )
+        data = resp.json()
+        results = []
+        for item in data.get('results', []):
+            if item.get('media_type') not in ('movie', 'tv'):
+                continue
+            results.append({
+                'id': item.get('id'),
+                'title': item.get('title') or item.get('name', ''),
+                'original_title': item.get('original_title') or item.get('original_name', ''),
+                'year': (item.get('release_date') or item.get('first_air_date') or '')[:4],
+                'poster': f"https://image.tmdb.org/t/p/w300{item['poster_path']}" if item.get('poster_path') else None,
+                'overview': item.get('overview', ''),
+                'rating': item.get('vote_average', 0),
+                'type': item.get('media_type')
+            })
+        return jsonify({'results': results[:12]})
+    except Exception as e:
+        return jsonify({'error': str(e), 'results': []})
+
+# === API: ВИДЕО ПРОКСИ (ОБХОД CORS) ===
+@app.route('/api/proxy')
+def api_proxy():
+    url = request.args.get('url', '')
+    if not url:
+        return 'Missing URL', 400
+    
+    # Заголовки для имитации обычного браузера
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    # Пробрасываем Range заголовок (для перемотки видео)
+    if 'Range' in request.headers:
+        headers['Range'] = request.headers['Range']
+    # Пробрасываем Referer если передан
+    referer = request.args.get('referer', '')
+    if referer:
+        headers['Referer'] = referer
+    
+    try:
+        resp = http_requests.get(url, headers=headers, stream=True, timeout=30)
+    except Exception as e:
+        return str(e), 502
+    
+    content_type = resp.headers.get('Content-Type', 'application/octet-stream')
+    
+    # Для m3u8 манифестов: переписываем URL сегментов через наш прокси
+    if '.m3u8' in url or 'mpegurl' in content_type.lower():
+        content = resp.text
+        base_url = url.rsplit('/', 1)[0] + '/'
+        lines = content.split('\n')
+        new_lines = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped and not stripped.startswith('#'):
+                # Это URL сегмента — переписываем через наш прокси
+                if not stripped.startswith('http'):
+                    stripped = base_url + stripped
+                stripped = '/api/proxy?url=' + quote(stripped, safe='')
+            new_lines.append(stripped if stripped else line)
+        
+        response = make_response('\n'.join(new_lines))
+        response.headers['Content-Type'] = 'application/vnd.apple.mpegurl'
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return response
+    
+    # Для всего остального (ts-сегменты, mp4) — стримим напрямую
+    def generate():
+        for chunk in resp.iter_content(chunk_size=65536):
+            yield chunk
+    
+    flask_resp = Response(generate(), status=resp.status_code)
+    flask_resp.headers['Content-Type'] = content_type
+    flask_resp.headers['Access-Control-Allow-Origin'] = '*'
+    if 'Content-Range' in resp.headers:
+        flask_resp.headers['Content-Range'] = resp.headers['Content-Range']
+    if 'Content-Length' in resp.headers:
+        flask_resp.headers['Content-Length'] = resp.headers['Content-Length']
+    if 'Accept-Ranges' in resp.headers:
+        flask_resp.headers['Accept-Ranges'] = resp.headers['Accept-Ranges']
+    
+    return flask_resp
+
+# === SOCKET.IO ===
 @socketio.on('connect')
 def handle_connect():
-    pass # Будем инициализировать при 'join'
+    pass
 
 @socketio.on('join')
 def handle_join(data):
@@ -71,7 +176,6 @@ def handle_join(data):
     room = get_room(room_id)
     room['guest_counter'] += 1
     
-    # Получаем старые данные или создаем новые
     user_data = room['users'].get(request.sid, {'name': f"Гость #{room['guest_counter']}", 'watching': False})
     
     new_name = data.get('name', '').strip()
@@ -98,14 +202,12 @@ def handle_start_watching(data):
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    # Ищем пользователя во всех комнатах
     for room_id, room in list(rooms.items()):
         if request.sid in room['users']:
             user_data = room['users'].pop(request.sid)
             print(f"<<< {user_data['name']} ушел из {room_id}", file=sys.stderr)
             emit('update_users', list(room['users'].values()), room=room_id)
             leave_room(room_id)
-            # Если в комнате никого нет, можно очищать ее, чтобы не забивать память
             if not room['users']:
                 del rooms[room_id]
 

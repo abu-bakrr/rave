@@ -5,17 +5,13 @@ const socket = io({
 });
 const video = document.getElementById('main-video');
 const ytContainer = document.getElementById('yt-container');
-const webtorContainer = document.getElementById('webtor-container');
 const videoWrapper = document.getElementById('video-wrapper');
 const videoUrlInput = document.getElementById('video-url');
 const loadUrlBtn = document.getElementById('load-url-btn');
-const torrentFileInput = document.getElementById('torrent-file-input');
-const loadTorrentBtn = document.getElementById('load-torrent-btn');
 const statusOverlay = document.getElementById('status-overlay');
 const joinOverlay = document.getElementById('join-overlay');
 const joinBtn = document.getElementById('join-btn');
 const fsBtn = document.getElementById('fs-btn');
-const torrentStatus = document.getElementById('torrent-status');
 
 // Чат и имена
 const chatInput = document.getElementById('chat-input');
@@ -24,6 +20,11 @@ const chatMessages = document.getElementById('chat-messages');
 const namePrompt = document.getElementById('name-prompt');
 const userNameInput = document.getElementById('user-name-input');
 const saveNameBtn = document.getElementById('save-name-btn');
+
+// Поиск фильмов
+const movieSearchInput = document.getElementById('movie-search-input');
+const movieSearchBtn = document.getElementById('movie-search-btn');
+const movieResults = document.getElementById('movie-results');
 
 const urlParams = new URLSearchParams(window.location.search);
 const isAdmin = urlParams.has('admin');
@@ -55,14 +56,10 @@ let myName = localStorage.getItem('rave_user_name');
 let isWatchingNow = false; 
 video.muted = true; 
 
-// === УНИВЕРСАЛЬНЫЙ ПЛЕЕР ===
-let currentMode = 'html5'; // 'html5', 'youtube', 'webtor'
+// === ПЛЕЕР ===
+let currentMode = 'html5'; // 'html5' или 'youtube'
 let ytPlayer = null;
 let ytReady = false;
-let webtorPlayer = null;
-let webtorReady = false;
-let webtorCurrentTime = 0;
-let webtorPlaying = false;
 let hlsInstance = null;
 let lastVideoUrl = '';
 
@@ -94,19 +91,18 @@ function extractYtId(url) {
 
 function stopCurrentPlayback() {
     if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
-    torrentStatus.style.display = 'none';
     video.pause();
     video.removeAttribute('src');
     video.load();
     if (ytReady && currentMode === 'youtube') {
         ytPlayer.stopVideo();
     }
-    if (currentMode === 'webtor') {
-        webtorContainer.innerHTML = '';
-        webtorPlayer = null;
-        webtorReady = false;
-        webtorPlaying = false;
-    }
+}
+
+// Превращает любой не-YouTube URL в проксированный
+function proxyUrl(url) {
+    if (url.startsWith('/api/proxy')) return url;
+    return '/api/proxy?url=' + encodeURIComponent(url);
 }
 
 function setMediaSource(url, time = 0, play = false) {
@@ -123,59 +119,30 @@ function setMediaSource(url, time = 0, play = false) {
             if (play) ytPlayer.loadVideoById(ytId, time);
             else ytPlayer.cueVideoById(ytId, time);
         } else {
-            // Если API еще не загрузилось, ждем 1 сек и пробуем снова
             setTimeout(() => setMediaSource(url, time, play), 1000);
         }
         return;
     }
 
-    // Иначе HTML5 или Webtor
+    // HTML5 (mp4, m3u8 через прокси)
+    currentMode = 'html5';
     ytContainer.style.display = 'none';
+    video.style.display = 'block';
 
-    if (url.startsWith('magnet:?')) {
-        currentMode = 'webtor';
-        video.style.display = 'none';
-        webtorContainer.style.display = 'block';
-        webtorContainer.innerHTML = '';
-        webtorReady = false;
-        
-        window.webtor = window.webtor || [];
-        window.webtor.push({
-            id: 'webtor-container',
-            magnet: url,
-            on: function(e) {
-                if (e.name === window.webtor.INITED) {
-                    webtorPlayer = e.player;
-                    webtorReady = true;
-                    if (play) webtorPlayer.play();
-                    if (time > 0) webtorPlayer.setPosition(time);
-                }
-                if (e.name === window.webtor.PLAY) {
-                    webtorPlaying = true;
-                    onWebtorStateChange(true);
-                }
-                if (e.name === window.webtor.PAUSE) {
-                    webtorPlaying = false;
-                    onWebtorStateChange(false);
-                }
-                if (e.name === window.webtor.CURRENT_TIME) {
-                    webtorCurrentTime = e.data;
-                }
-            },
-            lang: 'ru'
-        });
+    // Определяем, нужен ли HLS
+    if (url.includes('.m3u8')) {
+        const proxiedUrl = proxyUrl(url);
+        if (Hls.isSupported()) {
+            hlsInstance = new Hls();
+            hlsInstance.loadSource(proxiedUrl);
+            hlsInstance.attachMedia(video);
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = proxiedUrl;
+        }
     } else {
-        currentMode = 'html5';
-        webtorContainer.style.display = 'none';
-        video.style.display = 'block';
-        if (url.includes('.m3u8')) {
-            if (Hls.isSupported()) {
-                hlsInstance = new Hls();
-                hlsInstance.loadSource(url);
-                hlsInstance.attachMedia(video);
-            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                video.src = url;
-            }
+        // Обычное видео (mp4 и т.д.) — тоже через прокси если внешняя ссылка
+        if (url.startsWith('http')) {
+            video.src = proxyUrl(url);
         } else {
             video.src = url;
         }
@@ -188,27 +155,22 @@ function setMediaSource(url, time = 0, play = false) {
 const PlayerAPI = {
     getCurrentTime: () => {
         if (currentMode === 'youtube' && ytReady) return ytPlayer.getCurrentTime() || 0;
-        if (currentMode === 'webtor') return webtorCurrentTime || 0;
         return video.currentTime || 0;
     },
     setCurrentTime: (t) => {
         if (currentMode === 'youtube' && ytReady) ytPlayer.seekTo(t, true);
-        else if (currentMode === 'webtor' && webtorReady) webtorPlayer.setPosition(t);
         else video.currentTime = t;
     },
     play: () => {
         if (currentMode === 'youtube' && ytReady) ytPlayer.playVideo();
-        else if (currentMode === 'webtor' && webtorReady) webtorPlayer.play();
         else video.play().catch(() => {});
     },
     pause: () => {
         if (currentMode === 'youtube' && ytReady) ytPlayer.pauseVideo();
-        else if (currentMode === 'webtor' && webtorReady) webtorPlayer.pause();
         else video.pause();
     },
     isPaused: () => {
         if (currentMode === 'youtube' && ytReady) return ytPlayer.getPlayerState() !== 1;
-        if (currentMode === 'webtor') return !webtorPlaying;
         return video.paused;
     },
     setMuted: (m) => {
@@ -309,7 +271,69 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     };
 });
 
-// Админ: Загрузка нового видео
+// === ПОИСК ФИЛЬМОВ ===
+if (isAdmin && movieSearchBtn && movieSearchInput) {
+    const doSearch = async () => {
+        const query = movieSearchInput.value.trim();
+        if (!query) return;
+        
+        movieResults.innerHTML = '<div style="color: #9ca3af; padding: 10px; text-align: center;">Ищем...</div>';
+        
+        try {
+            const resp = await fetch('/api/search?q=' + encodeURIComponent(query));
+            const data = await resp.json();
+            
+            if (data.error) {
+                movieResults.innerHTML = `<div style="color: #ef4444; padding: 10px; font-size: 0.85rem;">${data.error}</div>`;
+                return;
+            }
+            
+            if (!data.results || data.results.length === 0) {
+                movieResults.innerHTML = '<div style="color: #9ca3af; padding: 10px; text-align: center;">Ничего не найдено</div>';
+                return;
+            }
+            
+            movieResults.innerHTML = '';
+            data.results.forEach(movie => {
+                const card = document.createElement('div');
+                card.style.cssText = 'display: flex; gap: 10px; padding: 10px; border-radius: 12px; background: rgba(255,255,255,0.05); margin-bottom: 8px; cursor: pointer; transition: 0.2s;';
+                card.onmouseenter = () => card.style.background = 'rgba(139, 92, 246, 0.15)';
+                card.onmouseleave = () => card.style.background = 'rgba(255,255,255,0.05)';
+                
+                const posterHtml = movie.poster 
+                    ? `<img src="${movie.poster}" style="width: 50px; height: 75px; border-radius: 8px; object-fit: cover; flex-shrink: 0;" onerror="this.style.display='none'">`
+                    : `<div style="width: 50px; height: 75px; border-radius: 8px; background: #1f1f23; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 1.5rem;">🎬</div>`;
+                
+                const typeLabel = movie.type === 'tv' ? '📺 Сериал' : '🎬 Фильм';
+                const ratingColor = movie.rating >= 7 ? '#10b981' : movie.rating >= 5 ? '#f59e0b' : '#ef4444';
+                
+                card.innerHTML = `
+                    ${posterHtml}
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="font-weight: 700; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${movie.title}</div>
+                        <div style="font-size: 0.75rem; color: #9ca3af; margin-top: 2px;">${movie.year} · ${typeLabel} · <span style="color: ${ratingColor}">★ ${movie.rating.toFixed(1)}</span></div>
+                        <div style="font-size: 0.7rem; color: #6b7280; margin-top: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">${movie.overview || ''}</div>
+                    </div>
+                `;
+                
+                card.onclick = () => {
+                    // Открываем Google с поиском фильма для быстрого нахождения ссылки
+                    const searchQuery = `${movie.title} ${movie.year} смотреть онлайн`;
+                    window.open('https://www.google.com/search?q=' + encodeURIComponent(searchQuery), '_blank');
+                };
+                
+                movieResults.appendChild(card);
+            });
+        } catch (err) {
+            movieResults.innerHTML = `<div style="color: #ef4444; padding: 10px;">Ошибка: ${err.message}</div>`;
+        }
+    };
+    
+    movieSearchBtn.onclick = doSearch;
+    movieSearchInput.onkeydown = (e) => { if (e.key === 'Enter') doSearch(); };
+}
+
+// Админ: Загрузка видео
 if (isAdmin) {
     loadUrlBtn.onclick = () => {
         let url = videoUrlInput.value.trim();
@@ -317,37 +341,6 @@ if (isAdmin) {
             socket.emit('change_video', { url: url, isAdmin: true, room_id: roomId });
         }
     };
-    
-    // Обработка загрузки .torrent файла
-    if (loadTorrentBtn && torrentFileInput) {
-        loadTorrentBtn.onclick = () => torrentFileInput.click();
-        
-        torrentFileInput.onchange = (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            
-            // Временно показываем статус
-            torrentStatus.style.display = 'block';
-            torrentStatus.textContent = 'Обработка торрент-файла...';
-            
-            // Инициализируем WebTorrent только для генерации магнет-ссылки
-            const tempClient = new WebTorrent();
-            const torrent = tempClient.add(file);
-            
-            torrent.on('infoHash', () => {
-                let magnetURI = torrent.magnetURI;
-                socket.emit('change_video', { url: magnetURI, isAdmin: true, room_id: roomId });
-                torrentFileInput.value = ''; // очищаем инпут
-                setTimeout(() => tempClient.destroy(), 500);
-            });
-            
-            torrent.on('error', (err) => {
-                torrentStatus.textContent = 'Ошибка торрент-файла: ' + err.message;
-                setTimeout(() => { torrentStatus.style.display = 'none'; }, 3000);
-                tempClient.destroy();
-            });
-        };
-    }
 }
 
 // Полноэкранный режим
@@ -482,21 +475,9 @@ socket.on('update_users', (userList) => {
 });
 
 // === СОБЫТИЯ ОТ ПЛЕЕРОВ К АДМИНУ ===
-function onWebtorStateChange(playing) {
-    if (!isAdmin) {
-        if (!isRemoteAction) socket.emit('get_sync', { room_id: roomId });
-        return;
-    }
-    if (!isRemoteAction) {
-        if (playing) socket.emit('play', { currentTime: webtorCurrentTime, isAdmin: true, room_id: roomId });
-        else socket.emit('pause', { currentTime: webtorCurrentTime, isAdmin: true, room_id: roomId });
-    }
-}
-
 function onYtStateChange(event) {
     if (!isAdmin) {
         if (!isRemoteAction && (event.data === YT.PlayerState.PLAYING || event.data === YT.PlayerState.PAUSED || event.data === YT.PlayerState.BUFFERING)) {
-            // Если гость пытается перехватить ютуб
             socket.emit('get_sync', { room_id: roomId });
         }
         return;

@@ -19,6 +19,10 @@ if [ -z "$DOMAIN" ]; then
     exit 1
 fi
 
+echo ""
+read -p "🎬 Введите ваш TMDB API ключ (или нажмите Enter, чтобы пропустить): " TMDB_KEY
+
+
 PROJECT_DIR=$(pwd)
 APP_USER=${SUDO_USER:-root}
 
@@ -39,7 +43,16 @@ echo ""
 echo "⏳ [2/5] Создание виртуального окружения и установка библиотек Python..."
 python3 -m venv .venv
 chown -R $APP_USER:$APP_USER .venv
-sudo -u $APP_USER ./.venv/bin/pip install Flask flask-socketio flask-compress gevent gevent-websocket
+sudo -u $APP_USER ./.venv/bin/pip install Flask flask-socketio flask-compress gevent gevent-websocket requests
+
+echo ""
+echo "⚙️  Создание config.json..."
+cat > $PROJECT_DIR/config.json <<EOF
+{
+    "tmdb_api_key": "$TMDB_KEY"
+}
+EOF
+chown $APP_USER:$APP_USER $PROJECT_DIR/config.json
 
 echo ""
 echo "⏳ [3/5] Настройка автозапуска сервиса (Systemd)..."
