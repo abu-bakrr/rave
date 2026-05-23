@@ -7,6 +7,7 @@ import uuid
 import json
 import requests as http_requests
 from urllib.parse import quote, unquote
+import gevent
 from flask import Flask, request, send_from_directory, make_response, redirect, jsonify, Response
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_compress import Compress
@@ -200,6 +201,11 @@ def handle_start_watching(data):
         room['users'][request.sid]['watching'] = True
         emit('update_users', list(room['users'].values()), room=room_id)
 
+def delete_room_if_empty(room_id):
+    if room_id in rooms and not rooms[room_id]['users']:
+        del rooms[room_id]
+        print(f"--- Комната {room_id} удалена из-за неактивности", file=sys.stderr)
+
 @socketio.on('disconnect')
 def handle_disconnect():
     for room_id, room in list(rooms.items()):
@@ -209,7 +215,8 @@ def handle_disconnect():
             emit('update_users', list(room['users'].values()), room=room_id)
             leave_room(room_id)
             if not room['users']:
-                del rooms[room_id]
+                # Даем 10 секунд на переподключение (например, при обновлении страницы)
+                gevent.spawn_later(10, delete_room_if_empty, room_id)
 
 def get_real_name(sid, room, data):
     name = data.get('name')

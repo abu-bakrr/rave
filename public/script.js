@@ -400,6 +400,9 @@ socket.on('sync', (state) => {
     if (state.videoUrl && lastVideoUrl !== state.videoUrl) {
         isRemoteAction = true;
         setMediaSource(state.videoUrl, state.currentTime, state.playing);
+        if (isAdmin && videoUrlInput) {
+            videoUrlInput.value = state.videoUrl;
+        }
     }
 
     if (state.videoUrl) {
