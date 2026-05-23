@@ -296,23 +296,21 @@ if (isAdmin && movieSearchBtn && movieSearchInput) {
             movieResults.innerHTML = '';
             data.results.forEach(movie => {
                 const card = document.createElement('div');
-                card.style.cssText = 'display: flex; gap: 10px; padding: 10px; border-radius: 12px; background: rgba(255,255,255,0.05); margin-bottom: 8px; cursor: pointer; transition: 0.2s;';
-                card.onmouseenter = () => card.style.background = 'rgba(139, 92, 246, 0.15)';
-                card.onmouseleave = () => card.style.background = 'rgba(255,255,255,0.05)';
+                card.className = 'movie-card';
                 
                 const posterHtml = movie.poster 
-                    ? `<img src="${movie.poster}" style="width: 50px; height: 75px; border-radius: 8px; object-fit: cover; flex-shrink: 0;" onerror="this.style.display='none'">`
-                    : `<div style="width: 50px; height: 75px; border-radius: 8px; background: #1f1f23; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 1.5rem;">🎬</div>`;
+                    ? `<img src="${movie.poster}" onerror="this.style.display='none'">`
+                    : `<div style="width: 48px; height: 72px; border-radius: 8px; background: #1f1f23; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;">🎬</div>`;
                 
                 const typeLabel = movie.type === 'tv' ? '📺 Сериал' : '🎬 Фильм';
                 const ratingColor = movie.rating >= 7 ? '#10b981' : movie.rating >= 5 ? '#f59e0b' : '#ef4444';
                 
                 card.innerHTML = `
                     ${posterHtml}
-                    <div style="flex: 1; min-width: 0;">
-                        <div style="font-weight: 700; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${movie.title}</div>
-                        <div style="font-size: 0.75rem; color: #9ca3af; margin-top: 2px;">${movie.year} · ${typeLabel} · <span style="color: ${ratingColor}">★ ${movie.rating.toFixed(1)}</span></div>
-                        <div style="font-size: 0.7rem; color: #6b7280; margin-top: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">${movie.overview || ''}</div>
+                    <div class="movie-info">
+                        <div class="movie-title">${movie.title}</div>
+                        <div class="movie-meta">${movie.year} · ${typeLabel} · <span style="color: ${ratingColor}">★ ${movie.rating.toFixed(1)}</span></div>
+                        <div class="movie-desc">${movie.overview || ''}</div>
                     </div>
                 `;
                 
