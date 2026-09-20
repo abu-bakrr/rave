@@ -6,9 +6,9 @@ import sys
 import uuid
 import json
 import requests as http_requests
-from urllib.parse import quote, unquote, urljoin
+from urllib.parse import quote, unquote
 import gevent
-from flask import Flask, request, send_from_directory, make_response, redirect, jsonify, Response, stream_with_context
+from flask import Flask, request, send_from_directory, make_response, redirect, jsonify, Response
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask_compress import Compress
 from gevent.pywsgi import WSGIServer
@@ -106,11 +106,6 @@ def api_proxy():
     if not url:
         return 'Missing URL', 400
     
-    proxy_session = getattr(app, 'proxy_session', None)
-    if proxy_session is None:
-        proxy_session = http_requests.Session()
-        app.proxy_session = proxy_session
-    
     # Заголовки для имитации обычного браузера
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -124,12 +119,7 @@ def api_proxy():
         headers['Referer'] = referer
     
     try:
-        resp = proxy_session.get(url, headers=headers, stream=True, timeout=30, allow_redirects=False)
-        # Если источник редиректит, мы тоже редиректим клиента на новый прокси-URL.
-        # Это сохраняет Range заголовки браузера, которые теряются при внутреннем редиректе requests.
-        if resp.status_code in (301, 302, 303, 307, 308) and 'Location' in resp.headers:
-            new_url = urljoin(url, resp.headers['Location'])
-            return redirect(f'/api/proxy?url={quote(new_url, safe="")}')
+        resp = http_requests.get(url, headers=headers, stream=True, timeout=30)
     except Exception as e:
         return str(e), 502
     
@@ -138,6 +128,7 @@ def api_proxy():
     # Для m3u8 манифестов: переписываем URL сегментов через наш прокси
     if '.m3u8' in url or 'mpegurl' in content_type.lower():
         content = resp.text
+        base_url = url.rsplit('/', 1)[0] + '/'
         lines = content.split('\n')
         new_lines = []
         for line in lines:
@@ -145,7 +136,7 @@ def api_proxy():
             if stripped and not stripped.startswith('#'):
                 # Это URL сегмента — переписываем через наш прокси
                 if not stripped.startswith('http'):
-                    stripped = urljoin(url, stripped)
+                    stripped = base_url + stripped
                 stripped = '/api/proxy?url=' + quote(stripped, safe='')
             new_lines.append(stripped if stripped else line)
         
@@ -159,15 +150,15 @@ def api_proxy():
         for chunk in resp.iter_content(chunk_size=65536):
             yield chunk
     
-    flask_resp = Response(stream_with_context(generate()), status=resp.status_code)
+    flask_resp = Response(generate(), status=resp.status_code)
     flask_resp.headers['Content-Type'] = content_type
     flask_resp.headers['Access-Control-Allow-Origin'] = '*'
-    flask_resp.headers['Accept-Ranges'] = 'bytes'
-    
-    # Пробрасываем важные заголовки для старых плееров
-    for h in ['Content-Range', 'Content-Length', 'ETag', 'Last-Modified']:
-        if h in resp.headers:
-            flask_resp.headers[h] = resp.headers[h]
+    if 'Content-Range' in resp.headers:
+        flask_resp.headers['Content-Range'] = resp.headers['Content-Range']
+    if 'Content-Length' in resp.headers:
+        flask_resp.headers['Content-Length'] = resp.headers['Content-Length']
+    if 'Accept-Ranges' in resp.headers:
+        flask_resp.headers['Accept-Ranges'] = resp.headers['Accept-Ranges']
     
     return flask_resp
 
