@@ -133,9 +133,33 @@ function setMediaSource(url, time = 0, play = false) {
     if (url.includes('.m3u8')) {
         const proxiedUrl = proxyUrl(url);
         if (Hls.isSupported()) {
-            hlsInstance = new Hls();
+            hlsInstance = new Hls({
+                maxBufferLength: 30,
+                maxMaxBufferLength: 60,
+                fragLoadingTimeOut: 20000,
+                manifestLoadingTimeOut: 20000
+            });
             hlsInstance.loadSource(proxiedUrl);
             hlsInstance.attachMedia(video);
+            
+            hlsInstance.on(Hls.Events.ERROR, function (event, data) {
+                if (data.fatal) {
+                    switch (data.type) {
+                        case Hls.ErrorTypes.NETWORK_ERROR:
+                            console.warn("HLS: fatal network error, trying to recover");
+                            hlsInstance.startLoad();
+                            break;
+                        case Hls.ErrorTypes.MEDIA_ERROR:
+                            console.warn("HLS: fatal media error, trying to recover");
+                            hlsInstance.recoverMediaError();
+                            break;
+                        default:
+                            console.error("HLS: unrecoverable error");
+                            hlsInstance.destroy();
+                            break;
+                    }
+                }
+            });
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
             video.src = proxiedUrl;
         }
