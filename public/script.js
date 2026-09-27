@@ -1,7 +1,7 @@
 const socket = io({ 
     reconnection: true, 
     reconnectionDelay: 1000,
-    transports: ['websocket']
+    transports: ['polling', 'websocket'] // polling fallback нужен для iOS Safari
 });
 const video = document.getElementById('main-video');
 const ytContainer = document.getElementById('yt-container');
@@ -218,20 +218,28 @@ socket.on('connect', () => {
 });
 
 // === ЧАТ ===
-const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+// Lazy init AudioContext — iOS Safari требует user gesture перед созданием
+let audioCtx = null;
+function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+}
 function playChatSound() {
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    const oscillator = audioCtx.createOscillator();
-    const gainNode = audioCtx.createGain();
-    oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
-    oscillator.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.1);
-    gainNode.gain.setValueAtTime(0.02, audioCtx.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
-    oscillator.connect(gainNode);
-    gainNode.connect(audioCtx.destination);
-    oscillator.start();
-    oscillator.stop(audioCtx.currentTime + 0.2);
+    try {
+        const ctx = getAudioCtx();
+        if (ctx.state === 'suspended') ctx.resume();
+        const oscillator = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(880, ctx.currentTime);
+        oscillator.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.1);
+        gainNode.gain.setValueAtTime(0.02, ctx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+        oscillator.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        oscillator.start();
+        oscillator.stop(ctx.currentTime + 0.2);
+    } catch(e) { /* игнорируем ошибки аудио */ }
 }
 
 function addChatMessage(data) {
@@ -382,7 +390,7 @@ joinBtn.onclick = () => {
     joinOverlay.style.opacity = '0';
     setTimeout(() => joinOverlay.style.display = 'none', 500);
     PlayerAPI.setMuted(false); 
-    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const ctx = getAudioCtx(); if (ctx.state === 'suspended') ctx.resume();
     
     isWatchingNow = true;
     socket.emit('start_watching', { room_id: roomId });
