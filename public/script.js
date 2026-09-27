@@ -1,7 +1,7 @@
 const socket = io({ 
     reconnection: true, 
     reconnectionDelay: 1000,
-    transports: ['polling', 'websocket'] // polling fallback нужен для iOS Safari
+    transports: ['websocket']
 });
 const video = document.getElementById('main-video');
 const ytContainer = document.getElementById('yt-container');
@@ -62,9 +62,6 @@ let ytPlayer = null;
 let ytReady = false;
 let hlsInstance = null;
 let lastVideoUrl = '';
-
-// Определяем iOS один раз
-const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 // Инициализация YouTube API
 function onYouTubeIframeAPIReady() {
@@ -135,19 +132,11 @@ function setMediaSource(url, time = 0, play = false) {
     // Определяем, нужен ли HLS
     if (url.includes('.m3u8')) {
         const proxiedUrl = proxyUrl(url);
-        // На iOS используем нативный HLS — HLS.js работает нестабильно на iOS 16+
-        if (!isIOS && Hls.isSupported()) {
-            hlsInstance = new Hls({
-                maxBufferLength: 30,
-                maxMaxBufferLength: 60
-            });
+        if (Hls.isSupported()) {
+            hlsInstance = new Hls();
             hlsInstance.loadSource(proxiedUrl);
             hlsInstance.attachMedia(video);
-            hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
-                if (play) video.play().catch(() => {});
-            });
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            // Нативный HLS для iOS Safari
             video.src = proxiedUrl;
         }
     } else {
@@ -229,28 +218,20 @@ socket.on('connect', () => {
 });
 
 // === ЧАТ ===
-// Lazy init AudioContext — iOS Safari требует user gesture перед созданием
-let audioCtx = null;
-function getAudioCtx() {
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    return audioCtx;
-}
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 function playChatSound() {
-    try {
-        const ctx = getAudioCtx();
-        if (ctx.state === 'suspended') ctx.resume();
-        const oscillator = ctx.createOscillator();
-        const gainNode = ctx.createGain();
-        oscillator.type = 'sine';
-        oscillator.frequency.setValueAtTime(880, ctx.currentTime);
-        oscillator.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.1);
-        gainNode.gain.setValueAtTime(0.02, ctx.currentTime);
-        gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
-        oscillator.connect(gainNode);
-        gainNode.connect(ctx.destination);
-        oscillator.start();
-        oscillator.stop(ctx.currentTime + 0.2);
-    } catch(e) { /* игнорируем ошибки аудио */ }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const oscillator = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.1);
+    gainNode.gain.setValueAtTime(0.02, audioCtx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+    oscillator.start();
+    oscillator.stop(audioCtx.currentTime + 0.2);
 }
 
 function addChatMessage(data) {
@@ -401,7 +382,7 @@ joinBtn.onclick = () => {
     joinOverlay.style.opacity = '0';
     setTimeout(() => joinOverlay.style.display = 'none', 500);
     PlayerAPI.setMuted(false); 
-    const ctx = getAudioCtx(); if (ctx.state === 'suspended') ctx.resume();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
     
     isWatchingNow = true;
     socket.emit('start_watching', { room_id: roomId });
