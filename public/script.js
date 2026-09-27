@@ -63,6 +63,9 @@ let ytReady = false;
 let hlsInstance = null;
 let lastVideoUrl = '';
 
+// Определяем iOS один раз
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
 // Инициализация YouTube API
 function onYouTubeIframeAPIReady() {
     ytPlayer = new YT.Player('yt-player', {
@@ -132,11 +135,19 @@ function setMediaSource(url, time = 0, play = false) {
     // Определяем, нужен ли HLS
     if (url.includes('.m3u8')) {
         const proxiedUrl = proxyUrl(url);
-        if (Hls.isSupported()) {
-            hlsInstance = new Hls();
+        // На iOS используем нативный HLS — HLS.js работает нестабильно на iOS 16+
+        if (!isIOS && Hls.isSupported()) {
+            hlsInstance = new Hls({
+                maxBufferLength: 30,
+                maxMaxBufferLength: 60
+            });
             hlsInstance.loadSource(proxiedUrl);
             hlsInstance.attachMedia(video);
+            hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+                if (play) video.play().catch(() => {});
+            });
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            // Нативный HLS для iOS Safari
             video.src = proxiedUrl;
         }
     } else {
